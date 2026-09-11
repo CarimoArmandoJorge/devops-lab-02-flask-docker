@@ -69,6 +69,47 @@ from any interface, which is required for host-to-container port mapping
 - Container networking basics (bind address vs port mapping)
 - `docker ps` for inspecting running containers
 
-## Next Steps
-- Add a database service and orchestrate both with Docker Compose
-- Add a CI/CD pipeline to automate build and push to a registry
+## Docker Compose: Multi-Container Orchestration
+Evolved the application to connect to a PostgreSQL database, orchestrated
+via Docker Compose.
+
+**Environment-based configuration:** database credentials and host are read
+from environment variables (`os.environ.get(...)`) instead of being
+hardcoded required since each environment (dev/staging/prod) has
+different values.
+
+**Compose internal networking:** service names in `docker-compose.yml`
+(e.g. `db`) act as resolvable hostnames within Compose's internal network
+conceptually similar to DNS (Phase 3), but scoped to the containers defined
+in the same Compose project.
+
+## Race Condition: `depends_on` vs Actual Readiness
+Initially used `depends_on: - db`, which only guarantees **start order**,
+not that the database is actually ready to accept connections. Testing
+`/db-check` immediately after `docker compose up` occasionally failed.
+
+**Fix:** added a proper healthcheck to the `db` service using `pg_isready`,
+and changed `depends_on` to use `condition: service_healthy`:
+```yaml
+healthcheck:
+  test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+  interval: 5s
+  timeout: 5s
+  retries: 5
+```
+
+**Second-order finding:** even with the database healthcheck in place, a
+`curl` fired immediately after `docker compose up -d` could still fail with
+`Connection reset by peer` this time because the **application container
+itself** hadn't finished starting yet, not the database. This demonstrated
+that "container running" is not the same as "application ready to serve
+traffic" a distinction that matters even more at the orchestration level
+(Kubernetes readiness probes address this properly; a fixed `sleep` here
+was only used for demonstration, not a production-grade fix).
+
+## What I Learned
+- Multi-container orchestration with Docker Compose
+- Environment variables for configuration across environments
+- Compose's internal DNS-like service resolution
+- The difference between process start order and actual service readiness
+- Why `depends_on` alone is insufficient without healthchecks
