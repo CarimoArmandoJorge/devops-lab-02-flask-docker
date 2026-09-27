@@ -113,3 +113,39 @@ was only used for demonstration, not a production-grade fix).
 - Compose's internal DNS-like service resolution
 - The difference between process start order and actual service readiness
 - Why `depends_on` alone is insufficient without healthchecks
+
+## CI/CD Pipeline (GitHub Actions)
+Added a two-stage pipeline (`.github/workflows/ci.yml`) that runs
+automatically on every push or pull request to `main`:
+
+1. **test** - installs dependencies and runs automated tests with `pytest`.
+2. **build** - builds the Docker image, but only if the `test` job succeeds
+   (`needs: test`).
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: pytest
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t flask-docker-app .
+```
+
+**Test added:** `test_app.py` uses Flask's built-in `test_client()` to
+simulate a request to the `/` route without needing a running server,verifying both status code and response content.
+
+**Key concept - `needs:`** ensures the build only happens after tests pass, avoiding wasted CI time (and potential deployment of broken code) if tests
+fail.
+
+**Debugging note:** an early pipeline run only showed one job instead of two traced back to an unsaved file in the editor being committed as its older version. A reminder that a file must actually be saved before `git add` picks up the intended changes.
