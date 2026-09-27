@@ -149,3 +149,44 @@ simulate a request to the `/` route without needing a running server,verifying b
 fail.
 
 **Debugging note:** an early pipeline run only showed one job instead of two traced back to an unsaved file in the editor being committed as its older version. A reminder that a file must actually be saved before `git add` picks up the intended changes.
+
+## Publishing to Docker Hub
+Extended the pipeline with a third job (`push`) that publishes the built
+image to Docker Hub, but only on pushes to `main` (not on pull requests):
+
+```yaml
+push:
+  needs: build
+  runs-on: ubuntu-latest
+  if: github.ref == 'refs/heads/main'
+  steps:
+    - uses: actions/checkout@v4
+    - uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+    - uses: docker/build-push-action@v6
+      with:
+        context: .
+        push: true
+        tags: ${{ secrets.DOCKERHUB_USERNAME }}/flask-docker-app:latest
+```
+
+**Why restrict to `main` only:** publishing on every pull request would push
+unreviewed code to a public `:latest` tag, and would unnecessarily expose
+registry credentials in untrusted contexts (e.g. external PRs in open
+source projects). Build and test should run on PRs; publishing should only
+happen after code is merged.
+
+**Debugging the credential setup (real issues hit and fixed):**
+1. `Error: Username required` - traced to a typo in the GitHub Secret name
+   (`DOCKERHUB_USERNAMI` instead of `DOCKERHUB_USERNAME`); secret names must
+   match the workflow reference exactly.
+2. `malformed HTTP Authorization header` - the Docker Hub token worked
+   correctly when tested locally (`docker login`), which isolated the
+   problem to how the secret was pasted into GitHub (likely a stray
+   whitespace/newline from copy-paste). Regenerating the token and pasting
+   it more carefully resolved it.
+
+**Verified:** image successfully published and publicly available at
+`docker pull carimoarmandojorge/flask-docker-app`.
